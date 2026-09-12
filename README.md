@@ -151,7 +151,7 @@ adb install -r androidApp/build/outputs/apk/debug/androidApp-debug.apk
    类目 ID，只在原有类目卡片中按需增添应用包名。
 
 3. **保存**：应用不会自动保存。所有修改（含导入）先暂存在应用内，点击线程 / 类目主页右下的保存按钮
-   才写入 `threads.json` / `categories.json`。保存前会做包名 / 类目 / 线程名冲突检测，
+   才会写入 `threads.json` / `categories.json`。保存前会做包名 / 类目 / 线程名冲突检测，
    并生成一条可回溯的历史记录（可命名或备注）；放弃修改点击恢复按钮即可。
 
 4. **主题**：更多 → 主题设置，切换模式与强调色；开启 Monet 后强调色/模式实时生效。
@@ -161,26 +161,8 @@ adb install -r androidApp/build/outputs/apk/debug/androidApp-debug.apk
    会先弹窗做版本转换；若核心数与本机不同，还会询问原机 CPU 架构（如 `1,3,3`），
    可选择“自适应转化”把核心掩码映射到本机核心簇，或把自定义核心数改为与文件一致后按原样导入。
 
-6. **锁定文件**：更多 → Scene 分组，锁定 / 解锁 threads.json 与 categories.json，防止 Scene 覆盖配置。
+6. **锁定文件**：更多 → Scene 分组，锁定 / 解锁 threads.json 与 categories.json，防止 Scene 覆盖配置。**建议开启。**
 
-7. **首次使用**：首次打开应用会弹出使用指南，阅读 10 秒后可关闭。
-
----
-
-## 四、注意事项
-
-- 配置文件位于 `/data/user/0/com.omarea.vtools/files/`，保存 / 读取通过
-  `su -mm`（全局 mount namespace）执行，避免 KernelSU 隔离导致读不到文件。
-- 无 root 时写文件会降级尝试直接写并可能失败。
-- **锁定文件**只影响当前配置目录下的文件；`lsattr` 精确判断锁状态。
-- **版本转换是尽力而为**：非 Unity 的负载最重线程、`rr`、Scene 8 的 `ni` 等在转换时可能丢失；
-  导入/回溯会先弹窗确认。
-- 应用自身的设置与日志存储在应用私有 `SharedPreferences` 与 `cache/logs` 下；
-  日志默认关闭（上限 0 KB），开启后写入缓存并自动修剪到上限。
-- 模拟器与真机的 Scene 版本可能不同，启动时若检测到与所选版本不一致会弹窗提示；
-  选择“永久忽略”后不再每次启动检测。
-- 同一应用允许出现在多个类目中（Scene 官方行为），跨类目包名重复不视为冲突；
-  通配 `"*"` 类目仅允许出现在官方 `"Apps"` 类目。
 
 ---
 
@@ -209,5 +191,4 @@ adb install -r androidApp/build/outputs/apk/debug/androidApp-debug.apk
 
 本项目以 **[GNU General Public License v3.0](https://www.gnu.org/licenses/gpl-3.0)**（GPL-3.0-or-later）开源。
 GPL-3.0 为强著佐权许可：可自由使用、学习、修改与再分发；基于本项目的衍生作品（含修改后的源码分发）
-必须同样以 GPL-3.0 开源并保留版权与许可声明。所依赖的 Miuix、Compose Multiplatform、
-AndroidX、kotlinx.serialization 等组件均采用 Apache-2.0 或其他宽松许可，与本协议兼容。
+必须同样以 GPL-3.0 开源并保留版权与许可声明。
