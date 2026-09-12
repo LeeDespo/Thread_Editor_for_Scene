@@ -1,0 +1,24 @@
+[versions]
+agp = "9.4.0"
+kotlin = "2.4.10"
+kotlinx-serialization = "1.11.0"
+jetbrains-compose-multiplatform = "1.12.0"
+androidx-activity = "1.13.0"
+androidx-navigationevent = "1.1.2"
+
+[libraries]
+androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activity" }
+androidx-navigationevent-compose = { module = "androidx.navigationevent:navigationevent-compose", version.ref = "androidx-navigationevent" }
+kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
+miuix-ui = { module = "top.yukonga.miuix.kmp:miuix-ui", version = "0.9.4-rc01" }
+miuix-icons = { module = "top.yukonga.miuix.kmp:miuix-icons", version = "0.9.4-rc01" }
+miuix-preference = { module = "top.yukonga.miuix.kmp:miuix-preference", version = "0.9.4-rc01" }
+miuix-nav = { module = "top.yukonga.miuix.kmp:miuix-nav", version = "0.9.4-rc01" }
+
+[plugins]
+androidApplication = { id = "com.android.application", version.ref = "agp" }
+androidKotlinMultiplatformLibrary = { id = "com.android.kotlin.multiplatform.library", version.ref = "agp" }
+kotlinMultiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
+composeCompiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+composeMultiplatform = { id = "org.jetbrains.compose", version.ref = "jetbrains-compose-multiplatform" }
+kotlinSerialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }

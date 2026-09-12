@@ -1,0 +1,28 @@
+.gradle/
+build/
+**/build/
+local.properties
+.kotlin/
+.idea/
+*.iml
+captures/
+*.apk
+*.log
+
+# OS noise
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+*.swp
+
+# IDE
+.idea/
+
+# Signing (never commit)
+*.jks
+*.keystore
+credentials/
+
+# Stray local files
+PM-
