@@ -35,7 +35,7 @@ private data class CreditEntry(
     val linkLabel: String,
 )
 
-private val APP_REPO_URL = "https://github.com/LeeDespo"
+private val APP_REPO_URL = "https://github.com/LeeDespo/Thread_Editor_for_Scene"
 
 /** Reference documents shown at the bottom of the About page. */
 private data class ReferenceEntry(val name: String, val url: String)

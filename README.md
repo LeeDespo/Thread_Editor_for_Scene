@@ -1,4 +1,4 @@
-# Thread Editor
+# Thread Editor（Thread_Editor_for_Scene）
 
 一个基于 **Miuix**（Compose Multiplatform UI 库）的开源 Android 应用，用于编辑
 [Scene](https://omarea.com/#/) 的性能调节配置文件：`threads.json`（核心分配）
@@ -33,7 +33,7 @@
 ### 命令
 
 ```bash
-# 在项目根目录 ThreadEditor/ 下执行
+# 在项目根目录（clone 后进入 Thread_Editor_for_Scene/）执行
 ./gradlew :androidApp:assembleDebug
 ```
 
