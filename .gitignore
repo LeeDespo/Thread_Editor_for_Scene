@@ -27,3 +27,8 @@ credentials/
 
 # Stray local files
 PM-
+
+# Local development notes (kept out of the source distribution)
+AGENTS.md
+CROSS_ARCH_ADAPTATION.md
+CODE_REVIEW.md
