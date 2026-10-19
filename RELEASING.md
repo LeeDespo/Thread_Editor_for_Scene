@@ -398,7 +398,7 @@ Thread Editor v<version>。
 | `.github/workflows/build.yml` | push 到 `main`、pull request | 编译 `:androidApp:assembleDebug`，上传 debug APK artifact |
 | `.github/workflows/release.yml` | push tag `v*` | 注入签名材料，构建并验证 release APK，创建 GitHub Release 并上传资产 |
 
-> **状态说明：这两个工作流是新增配置，尚未在真实 GitHub Actions 上运行过。** 首次合并后请先观察 `build.yml` 的 PR/主分支运行结果；在真实运行验证前，优先使用 6.3 的手动发布流程。在 `build.yml` 首次变绿之前，1.1/6.1 的“等待 build.yml”不构成发布阻塞条件；首次变绿后，后续发布再按 1.1/6.1 等待结果。
+> **状态说明：`build.yml` 已于 2026-10-19 在真实 GitHub Actions 上运行通过（`main@4d6a6cb`，debug APK artifact 已上传）；`release.yml` 尚未在真实 tag 上运行过。** 首次发布仍建议按 6.3 手动流程；在 `release.yml` 首次成功之前，不要把它作为唯一发布方式。1.1/6.1 的“等待 build.yml”现在可以作为发布前置检查。
 
 ### 7.1 build.yml
 
