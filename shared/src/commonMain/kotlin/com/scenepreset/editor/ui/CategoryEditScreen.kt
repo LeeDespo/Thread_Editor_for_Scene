@@ -99,10 +99,10 @@ fun CategoryEditScreen(
                 }
             },
         ) { padding ->
+            Box(Modifier.fillMaxSize().padding(padding)) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(padding)
                     .verticalScroll(rememberScrollState())
                     .imePadding()
                     .padding(horizontal = 16.dp, vertical = 12.dp),
@@ -134,6 +134,8 @@ fun CategoryEditScreen(
                 }
                 Spacer(Modifier.height(96.dp))
             }
+            TopScrim(Modifier.align(Alignment.TopCenter))
+        }
         }
 
         InfoDialog(

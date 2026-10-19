@@ -3,14 +3,14 @@
 
 package com.scenepreset.editor.ui
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -18,18 +18,21 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -50,7 +53,6 @@ import com.scenepreset.editor.model.CategoryRule
 import com.scenepreset.editor.model.isWildcard
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardColors
-import top.yukonga.miuix.kmp.basic.FloatingActionButton
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
@@ -58,13 +60,12 @@ import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.basic.TopAppBar
+import top.yukonga.miuix.kmp.basic.TopAppBarState
 import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.extended.Close
-import top.yukonga.miuix.kmp.icon.extended.Share
-import top.yukonga.miuix.kmp.icon.extended.Add
 import top.yukonga.miuix.kmp.icon.extended.Clear
-import top.yukonga.miuix.kmp.icon.extended.Download
+import top.yukonga.miuix.kmp.icon.extended.Close
 import top.yukonga.miuix.kmp.icon.extended.Delete
+import top.yukonga.miuix.kmp.icon.extended.Search
 import top.yukonga.miuix.kmp.icon.extended.Undo
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -93,180 +94,194 @@ fun CategoriesScreen(
     onDismissConflicts: () -> Unit,
 ) {
     var manifest by remember { mutableStateOf<AppManifest?>(null) }
-    val scrollBehavior = MiuixScrollBehavior()
+    // Same bar-integrated search as the threads page: big circle over the
+    // large title, small icon in the collapsed bar, field below the bar.
+    var searchActive by remember { mutableStateOf(query.isNotEmpty()) }
+    val listState = rememberLazyListState()
+    // Non-saveable bar state: a restored collapsed offset would fight the
+    // frozen expanded content padding (and short tabs could never scroll it
+    // back open).
+    val scrollBehavior = MiuixScrollBehavior(
+        state = remember { TopAppBarState(-Float.MAX_VALUE, 0f, 0f) },
+        canScroll = { listState.canScrollForward || listState.canScrollBackward },
+    )
+    val canScrollState by androidx.compose.runtime.derivedStateOf {
+        listState.canScrollForward || listState.canScrollBackward
+    }
+    // A short page cannot scroll the bar through its collapse animation, so a
+    // mid-collapse offset would stick forever (and leave both search buttons
+    // visible at partial alpha). Force full expansion whenever scrolling is
+    // impossible.
+    androidx.compose.runtime.LaunchedEffect(canScrollState) {
+        if (!canScrollState) scrollBehavior.state.heightOffset = 0f
+    }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = "类目",
-                largeTitle = "类目",
-                subtitle = "共 ${rules.size} 种类目",
-                navigationIcon = {},
-                actions = {},
-                scrollBehavior = scrollBehavior,
-            )
-        },
-        contentWindowInsets = contentInsetsTopOnly,
-        floatingActionButton = {
-            // Constant-size bottom-anchored overlay (same layout as HomeScreen):
-            // only opacity + translation animate, no cross-fade height jumps.
-            Box(contentAlignment = Alignment.BottomEnd) {
-                AnimatedVisibility(
-                    visible = !exportMode,
-                    enter = fadeIn() + slideInVertically { it },
-                    exit = fadeOut() + slideOutVertically { it },
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.End,
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        AnimatedVisibility(
-                            visible = dirty,
-                            enter = fadeIn() + slideInVertically { it / 2 },
-                            exit = fadeOut() + slideOutVertically { it / 2 },
-                        ) {
-                            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                CircularActionButton(
-                                    icon = MiuixIcons.Download,
-                                    tint = MiuixTheme.colorScheme.onPrimary,
-                                    bg = MiuixTheme.colorScheme.primary,
-                                    onClick = onSave,
-                                )
-                                CircularActionButton(
-                                    icon = MiuixIcons.Undo,
-                                    tint = MiuixTheme.colorScheme.onSecondaryContainer,
-                                    bg = MiuixTheme.colorScheme.secondaryContainer,
-                                    onClick = onRestore,
+    Box(Modifier.fillMaxSize()) {
+        Scaffold(
+            contentWindowInsets = WindowInsets(0, 0, 0, 0),
+            topBar = {
+                TopAppBar(
+                    title = if (searchActive) "" else "类目",
+                    largeTitle = if (searchActive) "" else "类目",
+                    subtitle = if (searchActive) "" else "共 ${rules.size} 种类目",
+                    navigationIcon = {},
+                    actions = {
+                        if (!searchActive) {
+                            Box(
+                                Modifier.graphicsLayer {
+                                    alpha = ((scrollBehavior.state.collapsedFraction - 0.2f) * 4f).coerceIn(0f, 1f)
+                                },
+                            ) {
+                                CircularIconAction(
+                                    icon = MiuixIcons.Search,
+                                    contentDescription = "搜索",
+                                    onClick = { searchActive = true },
                                 )
                             }
                         }
-                        FloatingActionButton(onClick = onAdd) {
-                            Icon(MiuixIcons.Add, contentDescription = "添加类目")
-                        }
-                    }
-                }
-                AnimatedVisibility(
-                    visible = exportMode,
-                    enter = fadeIn() + slideInVertically { it },
-                    exit = fadeOut() + slideOutVertically { it },
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.End,
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        CircularActionButton(
-                            icon = MiuixIcons.Close,
-                            tint = MiuixTheme.colorScheme.onSecondaryContainer,
-                            bg = MiuixTheme.colorScheme.secondaryContainer,
-                            onClick = onExitExport,
-                        )
-                        CircularActionButton(
-                            icon = MiuixIcons.Share,
-                            tint = MiuixTheme.colorScheme.onPrimary,
-                            bg = MiuixTheme.colorScheme.primary,
-                            onClick = { onExport(selectedForExport.mapNotNull { i -> rules.getOrNull(i) }) },
-                        )
-                    }
-                }
-            }
-        },
-    ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
-            CategoriesSearch(
-                query = query,
-                onQueryChange = onQueryChange,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-            )
-            val shown = remember(rules, query, context) {
-                rules.mapIndexed { index, rule -> index to rule }
-                    .filter { (_, rule) ->
-                        query.isBlank() ||
-                            (rule.packages?.any { pkg ->
-                                pkg.contains(query, true) || context.resolveApp(pkg).label.contains(query, true)
-                            } == true) ||
-                            (rule.activities?.any { it.contains(query, true) } == true) ||
-                            rule.category.contains(query, true) ||
-                            rule.displayName.contains(query, true)
-                    }
-                    .sortedBy { (_, rule) -> if (rule.isWildcard) 1 else 0 }
-            }
-            // Pre-resolved badge entries: no per-recomposition resolveApp lookups.
-            val cardData = remember(shown, context) {
-                shown.map { (index, rule) ->
-                    CategoryCardData(
-                        index = index,
-                        rule = rule,
-                        entries = rule.packages.orEmpty().filter { it.isNotBlank() }.map { context.resolveApp(it) },
-                    )
-                }
-            }
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .nestedScroll(scrollBehavior.nestedScrollConnection)
-                    .exportLongPress(enabled = { !exportMode }) {
-                        if (dirty) onBlockedExport() else onEnterExport()
                     },
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 200.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
+                        scrollBehavior = scrollBehavior,
+                    bottomContent = {
+                        AnimatedVisibility(
+                            visible = searchActive,
+                            enter = expandVertically() + fadeIn(),
+                            exit = shrinkVertically() + fadeOut(),
+                        ) {
+                            CategoriesSearch(
+                                query = query,
+                                onQueryChange = onQueryChange,
+                                onClose = {
+                                    searchActive = false
+                                    onQueryChange("")
+                                },
+                            )
+                        }
+                    },
+                )
+            },
+            floatingActionButton = {
+                HomeFabStack(
+                    exportMode = exportMode,
+                    dirty = dirty,
+                    addLabel = "添加类目",
+                    onSave = onSave,
+                    onRestore = onRestore,
+                    onAdd = onAdd,
+                    onExitExport = onExitExport,
+                    onExportSelected = { onExport(selectedForExport.mapNotNull { i -> rules.getOrNull(i) }) },
+                )
+            },
+        ) { padding ->
+            Column(Modifier.fillMaxSize().padding(padding)) {
+                val shown = remember(rules, query, context) {
+                    rules.mapIndexed { index, rule -> index to rule }
+                        .filter { (_, rule) ->
+                            query.isBlank() ||
+                                (rule.packages?.any { pkg ->
+                                    pkg.contains(query, true) || context.resolveApp(pkg).label.contains(query, true)
+                                } == true) ||
+                                (rule.activities?.any { it.contains(query, true) } == true) ||
+                                rule.category.contains(query, true) ||
+                                rule.displayName.contains(query, true)
+                        }
+                        .sortedBy { (_, rule) -> if (rule.isWildcard) 1 else 0 }
+                }
+                // Pre-resolved badge entries: no per-recomposition resolveApp lookups.
+                val cardData = remember(shown, context) {
+                    shown.map { (index, rule) ->
+                        CategoryCardData(
+                            index = index,
+                            rule = rule,
+                            entries = rule.packages.orEmpty().filter { it.isNotBlank() }.map { context.resolveApp(it) },
+                        )
+                    }
+                }
+                BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
+                val shortList = shown.size <= 4
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .nestedScroll(scrollBehavior.nestedScrollConnection)
+                        .exportLongPress(enabled = { !exportMode }) {
+                            if (dirty) onBlockedExport() else onEnterExport()
+                        }
+                        .edgeFade(top = 22.dp, topStrength = { barFadeStrength(scrollBehavior.state.collapsedFraction) }),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp,
+                        bottom = if (shortList) maxHeight else 240.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    if (initialLoading) {
+                        item {
+                            Column(
+                                modifier = Modifier.fillMaxWidth().padding(top = 80.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                Text(
+                                    "正在读取配置…",
+                                    style = MiuixTheme.textStyles.footnote1,
+                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                )
+                            }
+                        }
+                    } else if (shown.isEmpty()) {
+                        item {
+                            Column(
+                                modifier = Modifier.fillMaxWidth().padding(top = 40.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                Text(
+                                    if (query.isNotBlank()) "没有匹配的类目" else "还没有类目",
+                                    style = MiuixTheme.textStyles.title3,
+                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                )
+                                Spacer(Modifier.height(6.dp))
+                                Text(
+                                    if (query.isNotBlank()) "换个关键词试试" else "点击右下角 + 添加一个类目",
+                                    style = MiuixTheme.textStyles.footnote1,
+                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                )
+                            }
+                        }
+                    }
+                    items(cardData, key = { it.index }, contentType = { "category" }) { card ->
+                        CategoryCard(
+                            rule = card.rule,
+                            entries = card.entries,
+                            disabled = card.index in disabled,
+                            wildcard = card.rule.isWildcard,
+                            exportMode = exportMode,
+                            selected = card.index in selectedForExport,
+                            selectable = !card.rule.isWildcard,
+                            onEdit = { onEdit(card.index) },
+                            onToggleDisabled = { onToggleDisabled(card.index) },
+                            onToggleSelect = { onToggleSelect(card.index) },
+                            onShowAppList = {
+                                manifest = AppManifest(
+                                    title = card.rule.displayName,
+                                    categories = listOf(card.rule.category to (card.rule.friendly.ifBlank { card.rule.category })),
+                                    apps = card.rule.packages.orEmpty().map { AppOrigin(it, null) },
+                                )
+                            },
+                        )
+                    }
+                    }
+                }
+            }
+        }
+        if (!searchActive) {
+            Box(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .statusBarsPadding()
+                    .padding(top = 52.dp, end = 16.dp)
+                    .graphicsLayer {
+                        val f = scrollBehavior.state.collapsedFraction
+                        alpha = (1f - f * 5f).coerceIn(0f, 1f)
+                        translationY = scrollBehavior.state.heightOffset
+                    },
             ) {
-                if (initialLoading) {
-                    item {
-                        Column(
-                            modifier = Modifier.fillMaxWidth().padding(top = 80.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                        ) {
-                            Text(
-                                "正在读取配置…",
-                                style = MiuixTheme.textStyles.footnote1,
-                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                            )
-                        }
-                    }
-                } else if (shown.isEmpty()) {
-                    item {
-                        Column(
-                            modifier = Modifier.fillMaxWidth().padding(top = 40.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                        ) {
-                            Text(
-                                if (query.isNotBlank()) "没有匹配的类目" else "还没有类目",
-                                style = MiuixTheme.textStyles.title3,
-                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                            )
-                            Spacer(Modifier.height(6.dp))
-                            Text(
-                                if (query.isNotBlank()) "换个关键词试试" else "点击右下角 + 添加一个类目",
-                                style = MiuixTheme.textStyles.footnote1,
-                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                            )
-                        }
-                    }
-                }
-                items(cardData, key = { it.index }, contentType = { "category" }) { card ->
-                    CategoryCard(
-                        rule = card.rule,
-                        entries = card.entries,
-                        disabled = card.index in disabled,
-                        wildcard = card.rule.isWildcard,
-                        exportMode = exportMode,
-                        selected = card.index in selectedForExport,
-                        selectable = !card.rule.isWildcard,
-                        onEdit = { onEdit(card.index) },
-                        onToggleDisabled = { onToggleDisabled(card.index) },
-                        onToggleSelect = { onToggleSelect(card.index) },
-                        onShowAppList = {
-                            manifest = AppManifest(
-                                title = card.rule.displayName,
-                                categories = listOf(card.rule.category to (card.rule.friendly.ifBlank { card.rule.category })),
-                                apps = card.rule.packages.orEmpty().map { AppOrigin(it, null) },
-                            )
-                        },
-                    )
-                }
+                LargeSearchButton(onClick = { searchActive = true })
             }
         }
     }
@@ -287,22 +302,23 @@ fun CategoriesScreen(
 }
 
 @Composable
-private fun CategoriesSearch(query: String, onQueryChange: (String) -> Unit, modifier: Modifier = Modifier) {
+private fun CategoriesSearch(query: String, onQueryChange: (String) -> Unit, onClose: () -> Unit) {
     TextField(
         value = query,
         onValueChange = onQueryChange,
         label = "搜索类目名称 / 包名 / 应用名 / 组件",
         singleLine = true,
-        trailingIcon = if (query.isNotEmpty()) {
-            {
-                IconButton(onClick = { onQueryChange("") }) {
-                    Icon(MiuixIcons.Clear, contentDescription = "清除")
-                }
+        trailingIcon = {
+            IconButton(onClick = { if (query.isNotEmpty()) onQueryChange("") else onClose() }) {
+                Icon(
+                    if (query.isEmpty()) MiuixIcons.Close else MiuixIcons.Clear,
+                    contentDescription = if (query.isEmpty()) "关闭搜索" else "清除",
+                )
             }
-        } else {
-            null
         },
-        modifier = modifier,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 6.dp),
     )
 }
 

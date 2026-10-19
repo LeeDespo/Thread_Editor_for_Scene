@@ -22,7 +22,6 @@ data class CpuClusterInfo(
     val label: String,
     val cpus: List<Int>,
 ) {
-    val mask: String get() = buildCoreMask(cpus.toSet())
     val rangeText: String get() = cpus.toRangeText()
 }
 
@@ -67,11 +66,10 @@ interface ThreadEditorContext {
     /** Appends a line to the on-device log. No-op when logging is disabled. */
     fun log(message: String)
 
-    /** Whether user-facing log recording is currently enabled. */
-    /** Log storage cap in KB (0 = disabled, max 1024). */
     /** Clears the on-device log file (keeps future logging intact). */
     fun clearLogs()
 
+    /** Log storage cap in KB (0 = disabled, max 1024). */
     fun logCapKb(): Int
 
     /** Sets the log storage cap in KB; 0 disables logging entirely. */
@@ -163,6 +161,7 @@ const val SETTING_SCENE_VERSION = "scene.version"
 const val SETTING_IGNORE_VERSION_PROMPT = "scene.ignoreVersionPrompt"
 const val SETTING_LOG_CAP_KB = "log.capKb"
 const val SETTING_SHOW_SYSTEM_APPS = "apps.showSystem"
+const val SETTING_CORE_TEXT_ENTRY = "edit.coreTextEntry"
 const val SETTING_GUIDE_SHOWN = "ui.guideShown"
 const val FILE_CUSTOM_TOPOLOGY = "custom_topology.json"
 const val SETTING_EXPORT_BLOCK_IGNORE = "ui.exportBlockIgnore"

@@ -3,14 +3,21 @@
 
 package com.scenepreset.editor.ui
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.dp
 import com.scenepreset.editor.data.ThreadEditorContext
 import top.yukonga.miuix.kmp.basic.Card
@@ -21,6 +28,7 @@ import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.TopAppBar
+import top.yukonga.miuix.kmp.basic.TopAppBarState
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Back
 import top.yukonga.miuix.kmp.preference.ArrowPreference
@@ -102,10 +110,14 @@ fun AboutScreen(
     context: ThreadEditorContext,
     onBack: () -> Unit,
 ) {
-    val scrollBehavior = MiuixScrollBehavior()
+    val listState = rememberLazyListState()
+    val scrollBehavior = MiuixScrollBehavior(
+        state = remember { TopAppBarState(-Float.MAX_VALUE, 0f, 0f) },
+        canScroll = { listState.canScrollForward || listState.canScrollBackward },
+    )
 
     Scaffold(
-        contentWindowInsets = contentInsetsTopOnly,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = "关于",
@@ -121,10 +133,12 @@ fun AboutScreen(
             )
         },
     ) { padding ->
+        Box(Modifier.fillMaxSize().padding(padding)) {
         LazyColumn(
+            state = listState,
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
+                .nestedScroll(scrollBehavior.nestedScrollConnection)
                 .overScrollVertical(),
             contentPadding = PaddingValues(bottom = 24.dp),
         ) {
@@ -191,6 +205,11 @@ fun AboutScreen(
                     )
                 }
             }
+        }
+        TopScrim(
+            Modifier.align(Alignment.TopCenter),
+            strength = { barFadeStrength(scrollBehavior.state.collapsedFraction) },
+        )
         }
     }
 }

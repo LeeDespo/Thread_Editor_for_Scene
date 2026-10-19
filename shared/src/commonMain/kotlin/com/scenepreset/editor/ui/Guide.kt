@@ -63,7 +63,7 @@ private const val FIRST_USE_GUIDE = """
 ## 其他
 - 主题：更多 → 主题设置，切换模式与强调色；开启 Monet 后实时生效。
 - 导入导出：更多 → 导入 / 导出，进行文件操作；导入时按版本自动转换。
-- 锁定文件：更多 → 锁定文件，防止 Scene 覆盖配置。
+- 锁定文件：更多 → Scene 分组，锁定 / 解锁 threads.json 与 categories.json，防止 Scene 覆盖配置。
 """
 
 /**

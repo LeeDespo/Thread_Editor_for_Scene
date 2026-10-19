@@ -10,12 +10,10 @@ import com.scenepreset.editor.data.SETTING_SCENE_PATH
 import com.scenepreset.editor.data.SceneRepository
 import com.scenepreset.editor.model.CategoriesCodec
 import com.scenepreset.editor.model.CategoryRule
-import com.scenepreset.editor.model.PresetRule
+import com.scenepreset.editor.model.ThreadRule
 import com.scenepreset.editor.model.SceneVersion
 import com.scenepreset.editor.model.ThreadsCodec
 import java.io.File
-
-private const val TAG = "SceneRepository"
 
 class SceneRepositoryImpl(
     private val prefs: SharedPreferences,
@@ -72,32 +70,25 @@ class SceneRepositoryImpl(
             return it
         }
         val current = path
-        val fileExists = exists()
-        val locked = isLocked()
-        val content = if (fileExists) {
-            val script = "if [ -f \"$current\" ]; then cat \"$current\"; else echo '__SCENE_MISSING__'; fi"
-            val (ok, out) = runSu(script)
-            if (ok && out.trim() != "__SCENE_MISSING__" && out.isNotBlank()) {
-                EditorLog.i("scene.repo", "load cat ok size=${out.length} head=${out.take(80)}")
-                out
-            } else {
-                EditorLog.i("scene.repo", "load cat fallback path=$current")
-                runCatching { File(current).readText() }.getOrDefault("[]")
-            }
+        // A single `cat` probe replaces the old exists() + cat + stat() triple:
+        // __SCENE_MISSING__ distinguishes an absent file from a read failure.
+        val script = "if [ -f \"$current\" ]; then cat \"$current\"; else echo '__SCENE_MISSING__'; fi"
+        val (ok, out) = runSu(script)
+        val content = if (ok && out.trim() != "__SCENE_MISSING__" && out.isNotBlank()) {
+            EditorLog.i("scene.repo", "load cat ok size=${out.length} head=${out.take(80)}")
+            out
         } else {
-            EditorLog.i("scene.repo", "load missing path=$current")
-            "[]"
+            EditorLog.i("scene.repo", "load cat fallback path=$current")
+            runCatching { File(current).readText() }.getOrDefault("[]")
         }
-        val size = runSu("stat -c %s '$current'")
-            .let { if (it.first) it.second.trim().toLongOrNull() ?: 0L else 0L }
         val rules = runCatching { ThreadsCodec.decode(content) }.getOrDefault(emptyList())
-        EditorLog.i("scene.repo", "load decoded=${rules.size} rules path=$current exists=$fileExists locked=$locked")
-        val result = PresetFile(current, fileExists, locked, size, rules)
+        EditorLog.i("scene.repo", "load decoded=${rules.size} rules path=$current")
+        val result = PresetFile(current, rules)
         loadCache = result
         return result
     }
 
-    override fun save(rules: List<PresetRule>, version: SceneVersion): String? {
+    override fun save(rules: List<ThreadRule>, version: SceneVersion): String? {
         val current = path
         val content = ThreadsCodec.encode(rules, version)
         val b64 = Base64.encodeToString(content.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
@@ -124,19 +115,7 @@ class SceneRepositoryImpl(
 
     override fun isLocked(): Boolean {
         lockedCache?.let { return it }
-        val script = """
-            LSATTR="lsattr"
-            if ! command -v lsattr >/dev/null 2>&1; then
-              if command -v busybox >/dev/null 2>&1; then LSATTR="busybox lsattr"; else LSATTR="/system/bin/lsattr"; fi
-            fi
-            A=`${'$'}LSATTR -d '$path' 2>/dev/null | awk '{print ${'$'}1}'`
-            if echo "${'$'}A" | grep -q i; then echo LOCKED; else echo UNLOCKED; fi
-        """.trimIndent()
-        val (ok, out) = runSu(script)
-        val locked = ok && out.trim() == "LOCKED"
-        lockedCache = locked
-        EditorLog.i("scene.repo", "isLocked=$locked path=$path")
-        return locked
+        return isLockedFor(path).also { lockedCache = it }
     }
 
     override fun setLocked(locked: Boolean): String? {
@@ -147,12 +126,24 @@ class SceneRepositoryImpl(
 
     override fun setCategoriesLocked(locked: Boolean): String? = setLockedFor(categoriesPath, locked) { }
 
+    // Busybox/built-in fallback preamble shared by every lock probe / toggle script.
+    private fun lsattrSetup(): String = """
+        LSATTR="lsattr"
+        if ! command -v lsattr >/dev/null 2>&1; then
+          if command -v busybox >/dev/null 2>&1; then LSATTR="busybox lsattr"; else LSATTR="/system/bin/lsattr"; fi
+        fi
+    """.trimIndent()
+
+    private fun chattrSetup(): String = """
+        CHATTR="chattr"
+        if ! command -v chattr >/dev/null 2>&1; then
+          if command -v busybox >/dev/null 2>&1; then CHATTR="busybox chattr"; else CHATTR="/system/bin/chattr"; fi
+        fi
+    """.trimIndent()
+
     private fun isLockedFor(target: String): Boolean {
         val script = """
-            LSATTR="lsattr"
-            if ! command -v lsattr >/dev/null 2>&1; then
-              if command -v busybox >/dev/null 2>&1; then LSATTR="busybox lsattr"; else LSATTR="/system/bin/lsattr"; fi
-            fi
+            ${lsattrSetup()}
             A=`${'$'}LSATTR -d '$target' 2>/dev/null | awk '{print ${'$'}1}'`
             if echo "${'$'}A" | grep -q i; then echo LOCKED; else echo UNLOCKED; fi
         """.trimIndent()
@@ -163,10 +154,7 @@ class SceneRepositoryImpl(
     private fun setLockedFor(target: String, locked: Boolean, onDone: (Boolean) -> Unit): String? {
         val op = if (locked) "+i" else "-i"
         val script = """
-            CHATTR="chattr"
-            if ! command -v chattr >/dev/null 2>&1; then
-              if command -v busybox >/dev/null 2>&1; then CHATTR="busybox chattr"; else CHATTR="/system/bin/chattr"; fi
-            fi
+            ${chattrSetup()}
             ${'$'}CHATTR $op '$target' 2>/dev/null && echo '__OK__' || echo '__FAIL__'
         """.trimIndent()
         val (ok, out) = runSu(script)
@@ -205,7 +193,7 @@ class SceneRepositoryImpl(
     }
 
     /**
-     * Atomically replaces Scene's threads.json:
+     * Atomically replaces a Scene JSON file:
      *   1. unlock the file if needed,
      *   2. write content to a temp file in the same directory (via base64),
      *   3. restore owner/group/mode/SELinux context,
@@ -302,15 +290,6 @@ class SceneRepositoryImpl(
         else "恢复备份失败：${out.ifBlank { "root 不可用" }}"
     }
 
-    override fun resetCategories(): String? {
-        categoriesCache = null
-        val current = categoriesPath
-        loadCache = null
-        val script = "chattr -i '$current' 2>/dev/null; rm -f '$current' && echo '__DONE__' || echo '__FAIL__'"
-        val (ok, out) = runSu(script)
-        return if (ok && out.contains("__DONE__")) null else "重置类目失败：${out.ifBlank { "root 不可用" }}"
-    }
-
     private fun writeJsonFile(base64Content: String, path: String): String {
         val dir = path.substringBeforeLast('/', "/")
         val tmp = "$dir/.threads_editor_tmp"
@@ -319,17 +298,11 @@ class SceneRepositoryImpl(
             TMP='$tmp'
             LOCKED=0
             mkdir -p "${'$'}(dirname "${'$'}F")" 2>/dev/null
-            LSATTR="lsattr"
-            if ! command -v lsattr >/dev/null 2>&1; then
-              if command -v busybox >/dev/null 2>&1; then LSATTR="busybox lsattr"; else LSATTR="/system/bin/lsattr"; fi
-            fi
+            ${lsattrSetup()}
             A=`${'$'}LSATTR -d "${'$'}F" 2>/dev/null | awk '{print ${'$'}1}'`
             if echo "${'$'}A" | grep -q i; then
               LOCKED=1
-              CHATTR="chattr"
-              if ! command -v chattr >/dev/null 2>&1; then
-                if command -v busybox >/dev/null 2>&1; then CHATTR="busybox chattr"; else CHATTR="/system/bin/chattr"; fi
-              fi
+              ${chattrSetup()}
               ${'$'}CHATTR -i "${'$'}F" 2>/dev/null
             fi
             rm -f "${'$'}TMP"
@@ -350,20 +323,14 @@ class SceneRepositoryImpl(
             if [ -n "${'$'}CTX" ] && [ "${'$'}CTX" != "?" ]; then chcon "${'$'}CTX" "${'$'}TMP" 2>/dev/null; fi
             if mv -f "${'$'}TMP" "${'$'}F" 2>/dev/null; then
               if [ "${'$'}LOCKED" = "1" ]; then
-                CHATTR="chattr"
-                if ! command -v chattr >/dev/null 2>&1; then
-                  if command -v busybox >/dev/null 2>&1; then CHATTR="busybox chattr"; else CHATTR="/system/bin/chattr"; fi
-                fi
+                ${chattrSetup()}
                 ${'$'}CHATTR +i "${'$'}F" 2>/dev/null
               fi
               echo '__DONE__'
             else
               rm -f "${'$'}TMP"
               if [ "${'$'}LOCKED" = "1" ]; then
-                CHATTR="chattr"
-                if ! command -v chattr >/dev/null 2>&1; then
-                  if command -v busybox >/dev/null 2>&1; then CHATTR="busybox chattr"; else CHATTR="/system/bin/chattr"; fi
-                fi
+                ${chattrSetup()}
                 ${'$'}CHATTR +i "${'$'}F" 2>/dev/null
               fi
               echo '__FAIL__MOVE'

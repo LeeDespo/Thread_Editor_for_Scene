@@ -10,7 +10,6 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.graphics.drawable.BitmapDrawable
 import android.net.Uri
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -293,7 +292,7 @@ fun rememberThreadEditorContext(): ThreadEditorContext {
 
             override fun warmAppCache(packageNames: List<String>) {
                 val missing = packageNames.filter { pkg ->
-                    synchronized(appCacheLock) { appCache[pkg] }?.icon != null
+                    synchronized(appCacheLock) { !appCache.containsKey(pkg) }
                 }
                 if (missing.isEmpty()) return
                 appScope.launch(Dispatchers.Default) {
@@ -406,13 +405,15 @@ fun rememberThreadEditorContext(): ThreadEditorContext {
             }
 
             override fun buildHistoryEntry(name: String, note: String, rules: List<ThreadRule>, version: SceneVersion): HistoryEntry {
-                val id = System.currentTimeMillis().toString()
+                // Millis alone can collide when two saves land in the same tick;
+                // the suffix keeps same-instant threads/categories entries distinct.
+                val id = "${System.currentTimeMillis()}-${java.util.UUID.randomUUID().toString().take(6)}"
                 val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date())
                 return HistoryEntry(id = id, timestamp = timestamp, name = name, note = note, rules = rules, sceneVersion = version.id, kind = HistoryKind.Threads)
             }
 
             override fun buildCategoryHistoryEntry(name: String, note: String, rules: List<CategoryRule>): HistoryEntry {
-                val id = System.currentTimeMillis().toString()
+                val id = "${System.currentTimeMillis()}-${java.util.UUID.randomUUID().toString().take(6)}"
                 val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date())
                 return HistoryEntry(id = id, timestamp = timestamp, name = name, note = note, kind = HistoryKind.Categories, categoryRules = rules)
             }
@@ -462,7 +463,8 @@ private fun firstLetter(label: String, packageName: String): String {
 }
 
 private fun drawableToBitmap(drawable: android.graphics.drawable.Drawable, size: Int): Bitmap {
-    if (drawable is BitmapDrawable && drawable.bitmap != null) return drawable.bitmap
+    // Never return the original BitmapDrawable bitmap: launcher icons are often
+    // 432x432 and would sit in the LRU at full resolution.
     val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
     drawable.setBounds(0, 0, size, size)
@@ -482,6 +484,12 @@ private val SU_BINARIES = listOf(
     "/data/adb/ap/bin/su",
 )
 
+// First successful (binary, option-shape) combination — the command itself is
+// NEVER part of the cached value, only the su option prefix; each call appends
+// its own command. Skipping the probe chain saves several process spawns per
+// shell call on KernelSU/Magisk devices.
+@Volatile private var workingSu: Pair<String, List<String>>? = null
+
 /**
  * Runs a shell command as root. Uses `-m`/`--mount-master` so the command runs
  * in the GLOBAL mount namespace; KernelSU otherwise isolates `su -c` to a
@@ -489,21 +497,29 @@ private val SU_BINARIES = listOf(
  * threads.json "invisible"). Falls back across common su paths.
  */
 internal fun runSu(cmd: String): Pair<Boolean, String> {
-    val variants = listOf(
-        listOf("-mm", "-c", cmd),
-        listOf("-m", "-c", cmd),
-        listOf("--mount-master", "-c", cmd),
-        listOf("-c", cmd),
+    workingSu?.let { (bin, opts) ->
+        val cached = execRaw(listOf(bin) + opts + cmd)
+        if (cached.first) return cached
+    }
+    val shapes = listOf(
+        listOf("-mm", "-c"),
+        listOf("-m", "-c"),
+        listOf("--mount-master", "-c"),
+        listOf("-c"),
     )
     var last: Pair<Boolean, String>? = null
     for (bin in SU_BINARIES) {
-        for (v in variants) {
-            val r = execRaw(listOf(bin) + v)
+        for (opts in shapes) {
+            val r = execRaw(listOf(bin) + opts + cmd)
             last = r
-            if (r.first) return r
+            if (r.first) {
+                workingSu = bin to opts
+                return r
+            }
         }
     }
-    // Last resort: already-rooted shell (adb root / su-less root).
+    // Last resort: already-rooted shell (adb root / su-less root). Never cached:
+    // a transient su failure must not permanently downgrade to a non-root shell.
     val fb = execRaw(listOf("sh", "-c", cmd))
     return if (fb.first) fb else (last ?: (false to "root 不可用"))
 }

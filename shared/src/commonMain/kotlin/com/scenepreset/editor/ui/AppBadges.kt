@@ -63,17 +63,6 @@ fun AppBadge(app: AppEntry, size: Dp = 28.dp, modifier: Modifier = Modifier) {
 /** Overlapping app-icon avatars plus a colored count block (for the rule card). */
 @Composable
 fun AppBadgeRow(
-    packages: List<String>,
-    resolve: (String) -> AppEntry,
-    onClick: () -> Unit,
-) = AppBadgeRow(
-    apps = packages.map(resolve),
-    onClick = onClick,
-)
-
-/** [AppBadgeRow] over pre-resolved entries — no per-recomposition lookups. */
-@Composable
-fun AppBadgeRow(
     apps: List<AppEntry>,
     onClick: () -> Unit,
 ) {

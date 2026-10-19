@@ -10,22 +10,30 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.dp
 import com.scenepreset.editor.model.SceneVersion
 import com.scenepreset.editor.data.ThreadEditorContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Scaffold
@@ -33,6 +41,7 @@ import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.basic.TopAppBar
+import top.yukonga.miuix.kmp.basic.TopAppBarState
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.window.WindowDialog
@@ -54,19 +63,34 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onMessage: (String) -> Unit,
     onVersionChange: (SceneVersion) -> Unit,
+    /** The loaded config references cores this device lacks: mask text entry cannot be turned off. */
+    coreTextEntryLocked: Boolean = false,
 ) {
     var showPathEdit by remember { mutableStateOf(false) }
     var showReset by remember { mutableStateOf(false) }
     var showCategoryReset by remember { mutableStateOf(false) }
     var showLogCap by remember { mutableStateOf(false) }
     var showVersion by remember { mutableStateOf(false) }
-    var locked by remember(settings.scenePath) { mutableStateOf(context.sceneRepository.isLocked()) }
-    var categoriesLocked by remember(settings.scenePath) { mutableStateOf(context.sceneRepository.isCategoriesLocked()) }
+    // Lock states come from root shells (lsattr) — load off the main thread and
+    // refetch whenever the config path changes. null = still probing.
+    var locked by remember(settings.scenePath) { mutableStateOf<Boolean?>(null) }
+    var categoriesLocked by remember(settings.scenePath) { mutableStateOf<Boolean?>(null) }
     var logCapKb by remember { mutableStateOf(context.logCapKb()) }
-    val scrollBehavior = MiuixScrollBehavior()
+    val scope = rememberCoroutineScope()
+    val listState = rememberLazyListState()
+    val scrollBehavior = MiuixScrollBehavior(
+        state = remember { TopAppBarState(-Float.MAX_VALUE, 0f, 0f) },
+        canScroll = { listState.canScrollForward || listState.canScrollBackward },
+    )
+    LaunchedEffect(settings.scenePath) {
+        val threads = withContext(Dispatchers.IO) { context.sceneRepository.isLocked() }
+        val cats = withContext(Dispatchers.IO) { context.sceneRepository.isCategoriesLocked() }
+        locked = threads
+        categoriesLocked = cats
+    }
 
     Scaffold(
-        contentWindowInsets = contentInsetsTopOnly,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = "更多",
@@ -78,8 +102,13 @@ fun SettingsScreen(
             )
         },
     ) { padding ->
+        Box(Modifier.fillMaxSize().padding(padding)) {
         LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(padding).nestedScroll(scrollBehavior.nestedScrollConnection).overScrollVertical(),
+            state = listState,
+            modifier = Modifier
+                .fillMaxSize()
+                .nestedScroll(scrollBehavior.nestedScrollConnection)
+                .overScrollVertical(),
             contentPadding = PaddingValues(bottom = 24.dp),
         ) {
             item { SmallTitle("外观") }
@@ -123,25 +152,31 @@ fun SettingsScreen(
                         SwitchPreference(
                             title = "锁定 threads.json",
                             summary = "防止线程配置文件被 Scene 覆盖",
-                            checked = locked,
+                            checked = locked == true,
                             onCheckedChange = {
-                                val error = context.sceneRepository.setLocked(!locked)
-                                if (error == null) {
-                                    locked = !locked
-                                    onMessage(if (locked) "已锁定 threads.json" else "已解除锁定 threads.json")
-                                } else onMessage(error)
+                                val current = locked ?: return@SwitchPreference
+                                scope.launch(Dispatchers.IO) {
+                                    val error = context.sceneRepository.setLocked(!current)
+                                    if (error == null) {
+                                        locked = !current
+                                        onMessage(if (!current) "已锁定 threads.json" else "已解除锁定 threads.json")
+                                    } else onMessage(error)
+                                }
                             },
                         )
                         SwitchPreference(
                             title = "锁定 categories.json",
                             summary = "防止类目配置文件被 Scene 覆盖",
-                            checked = categoriesLocked,
+                            checked = categoriesLocked == true,
                             onCheckedChange = {
-                                val error = context.sceneRepository.setCategoriesLocked(!categoriesLocked)
-                                if (error == null) {
-                                    categoriesLocked = !categoriesLocked
-                                    onMessage(if (categoriesLocked) "已锁定 categories.json" else "已解除锁定 categories.json")
-                                } else onMessage(error)
+                                val current = categoriesLocked ?: return@SwitchPreference
+                                scope.launch(Dispatchers.IO) {
+                                    val error = context.sceneRepository.setCategoriesLocked(!current)
+                                    if (error == null) {
+                                        categoriesLocked = !current
+                                        onMessage(if (!current) "已锁定 categories.json" else "已解除锁定 categories.json")
+                                    } else onMessage(error)
+                                }
                             },
                         )
                         ArrowPreference(
@@ -165,6 +200,17 @@ fun SettingsScreen(
                     colors = CardDefaults.defaultColors(color = MiuixTheme.colorScheme.surfaceContainer),
                 ) {
                     Column {
+                        SwitchPreference(
+                            title = "手动输入核心掩码",
+                            summary = if (coreTextEntryLocked) {
+                                "当前配置引用了本机没有的核心编号，须保持开启，否则这些编号会被核心按钮丢掉"
+                            } else {
+                                "编辑规则时用输入框代替核心选择按钮，支持 0-3,7 等写法"
+                            },
+                            checked = settings.coreTextEntry || coreTextEntryLocked,
+                            onCheckedChange = { onSettingsChange(settings.copy(coreTextEntry = it)) },
+                            enabled = !coreTextEntryLocked,
+                        )
                         SwitchPreference(
                             title = "显示系统应用",
                             summary = "在“添加应用”中显示系统应用包名",
@@ -245,6 +291,11 @@ fun SettingsScreen(
                 }
             }
         }
+        TopScrim(
+            Modifier.align(Alignment.TopCenter),
+            strength = { barFadeStrength(scrollBehavior.state.collapsedFraction) },
+        )
+        }
     }
 
     PathEditDialog(
@@ -261,9 +312,12 @@ fun SettingsScreen(
     ResetConfirmDialog(
         show = showReset,
         onConfirm = {
-            val err = context.sceneRepository.reset()
-            onMessage(err ?: "已删除 threads.json。请到 Scene 切换一次调度档位（LP/HP/EP），Scene 会自动重新生成")
             showReset = false
+            scope.launch(Dispatchers.IO) {
+                val err = context.sceneRepository.reset()
+                locked = false
+                onMessage(err ?: "已删除 threads.json。请到 Scene 切换一次调度档位（LP/HP/EP），Scene 会自动重新生成")
+            }
         },
         onDismiss = { showReset = false },
     )
@@ -276,17 +330,24 @@ fun SettingsScreen(
             "清除 Scene 的全部数据可拉取官方配置（会同时清空 Scene 的其它设置）。\n\n当前类目配置将被覆盖，确定继续吗？",
         confirmLabel = "恢复备份",
         onConfirm = {
-            val err = context.sceneRepository.restoreCategoriesBackup()
-            onMessage(err ?: "已恢复 categories.json 至首次打开时的备份")
             showCategoryReset = false
+            scope.launch {
+                val err = withContext(Dispatchers.IO) { context.sceneRepository.restoreCategoriesBackup() }
+                categoriesLocked = withContext(Dispatchers.IO) { context.sceneRepository.isCategoriesLocked() }
+                onMessage(err ?: "已恢复 categories.json 至首次打开时的备份")
+            }
         },
         onDismiss = { showCategoryReset = false },
     )
 
-    LogCapDialog(
+    ListPickDialog(
         show = showLogCap,
-        currentKb = logCapKb,
-        onSelect = { kb ->
+        title = "日志存储上限",
+        hint = "0 KB 表示禁用日志（不消耗性能）。设为 256/512/1024 KB 后，日志会写入应用缓存目录并自动修剪到该上限。",
+        items = LOG_CAP_CHOICES.map { if (it == 0) "禁用" else "$it KB" },
+        selectedIndex = LOG_CAP_CHOICES.indexOf(logCapKb),
+        onSelect = { index ->
+            val kb = LOG_CAP_CHOICES[index]
             logCapKb = kb
             context.setLogCapKb(kb)
             onMessage(if (kb <= 0) "日志已禁用" else "日志上限 $kb KB（文件位于应用缓存目录）")
@@ -295,16 +356,20 @@ fun SettingsScreen(
         onDismiss = { showLogCap = false },
     )
 
-    VersionDialog(
+    ListPickDialog(
         show = showVersion,
-        selected = settings.sceneVersion,
-        onSelect = { version ->
+        title = "选择 Scene 版本",
+        items = SceneVersion.entries.map { it.display },
+        selectedIndex = SceneVersion.entries.indexOf(settings.sceneVersion),
+        onSelect = { index ->
             showVersion = false
-            onVersionChange(version)
+            onVersionChange(SceneVersion.entries[index])
         },
         onDismiss = { showVersion = false },
     )
 }
+
+private val LOG_CAP_CHOICES = listOf(0, 256, 512, 1024)
 
 @Composable
 private fun PathEditDialog(
@@ -313,7 +378,7 @@ private fun PathEditDialog(
     onConfirm: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var path by remember { mutableStateOf(current) }
+    var path by remember(show, current) { mutableStateOf(current) }
     WindowDialog(show = show, onDismissRequest = onDismiss) {
         Column(
             modifier = Modifier.fillMaxWidth().padding(20.dp),
@@ -364,70 +429,40 @@ private fun ResetConfirmDialog(
 }
 
 @Composable
-private fun LogCapDialog(
+private fun ListPickDialog(
     show: Boolean,
-    currentKb: Int,
+    title: String,
+    items: List<String>,
+    selectedIndex: Int,
     onSelect: (Int) -> Unit,
     onDismiss: () -> Unit,
+    hint: String? = null,
 ) {
     WindowDialog(show = show, onDismissRequest = onDismiss) {
         Column(
             modifier = Modifier.fillMaxWidth().padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Text("日志存储上限", style = MiuixTheme.textStyles.title3, color = MiuixTheme.colorScheme.onSurfaceContainerHighest)
-            Text(
-                "0 KB 表示禁用日志（不消耗性能）。设为 256/512/1024 KB 后，日志会写入应用缓存目录并自动修剪到该上限。",
-                style = MiuixTheme.textStyles.footnote2,
-                color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
-            )
-            listOf(0, 256, 512, 1024).forEach { kb ->
-                val label = if (kb == 0) "禁用" else "$kb KB"
-                val sel = kb == currentKb
+            Text(title, style = MiuixTheme.textStyles.title3, color = MiuixTheme.colorScheme.onSurfaceContainerHighest)
+            if (hint != null) {
+                Text(
+                    hint,
+                    style = MiuixTheme.textStyles.footnote2,
+                    color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
+                )
+            }
+            items.forEachIndexed { index, label ->
+                val sel = index == selectedIndex
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(12.dp))
                         .background(if (sel) MiuixTheme.colorScheme.primaryContainer else MiuixTheme.colorScheme.surfaceContainer)
-                        .clickable { onSelect(kb) }
+                        .clickable { onSelect(index) }
                         .padding(12.dp),
                 ) {
                     Text(
                         label,
-                        style = MiuixTheme.textStyles.main,
-                        color = if (sel) MiuixTheme.colorScheme.onPrimaryContainer else MiuixTheme.colorScheme.onSurfaceContainer,
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun VersionDialog(
-    show: Boolean,
-    selected: SceneVersion,
-    onSelect: (SceneVersion) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    WindowDialog(show = show, onDismissRequest = onDismiss) {
-        Column(
-            modifier = Modifier.fillMaxWidth().padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Text("选择 Scene 版本", style = MiuixTheme.textStyles.title3, color = MiuixTheme.colorScheme.onSurfaceContainerHighest)
-            SceneVersion.entries.forEach { v ->
-                val sel = v == selected
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(if (sel) MiuixTheme.colorScheme.primaryContainer else MiuixTheme.colorScheme.surfaceContainer)
-                        .clickable { onSelect(v) }
-                        .padding(12.dp),
-                ) {
-                    Text(
-                        v.display,
                         style = MiuixTheme.textStyles.main,
                         color = if (sel) MiuixTheme.colorScheme.onPrimaryContainer else MiuixTheme.colorScheme.onSurfaceContainer,
                     )

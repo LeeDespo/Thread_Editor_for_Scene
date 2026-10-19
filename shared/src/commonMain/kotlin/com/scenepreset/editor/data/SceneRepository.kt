@@ -3,23 +3,22 @@
 
 package com.scenepreset.editor.data
 
-import com.scenepreset.editor.model.PresetRule
+import com.scenepreset.editor.model.ThreadRule
 import com.scenepreset.editor.model.CategoryRule
 import com.scenepreset.editor.model.SceneVersion
 
-/** Metadata + parsed content for the target `threads.json`. */
+/** Parsed content of the target `threads.json`. */
 data class PresetFile(
     val path: String,
-    val exists: Boolean,
-    val locked: Boolean,
-    val size: Long,
-    val rules: List<PresetRule>,
+    val rules: List<ThreadRule>,
 )
 
 /**
  * Owns a single Scene `threads.json` (the "preset" target path). All rule
  * operations in the editor read/write this file, which may be the default
  * Scene location or a user customized path.
+ *
+ * Every method shells out through `su` and must be called off the main thread.
  */
 interface SceneRepository {
     val path: String
@@ -31,7 +30,7 @@ interface SceneRepository {
     fun load(): PresetFile
 
     /** @return null on success, otherwise an error message. */
-    fun save(rules: List<PresetRule>, version: SceneVersion = SceneVersion.SceneN1): String?
+    fun save(rules: List<ThreadRule>, version: SceneVersion = SceneVersion.SceneN1): String?
 
     fun isLocked(): Boolean
 
@@ -70,9 +69,6 @@ interface SceneRepository {
      * @return null on success, otherwise an error message.
      */
     fun restoreCategoriesBackup(): String?
-
-    /** Deletes the target categories.json. @return null on success. */
-    fun resetCategories(): String?
 
     fun isCategoriesLocked(): Boolean
 

@@ -33,6 +33,10 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
+/** Shared token splitter: half/full-width commas & semicolons, spaces, newlines, tabs. */
+internal fun splitTokens(raw: String): List<String> =
+    raw.split(',', '，', ';', '；', ' ', '\n', '\t').map { it.trim() }.filter { it.isNotEmpty() }
+
 /**
  * A token input: type comma-separated values and press Done; each becomes a removable
  * chip rendered above the field. Chips wrap onto the next line automatically.
@@ -53,8 +57,7 @@ fun ChipInputField(
     var input by remember { mutableStateOf("") }
 
     fun commit() {
-        val tokens = input.split(',', '，', ';', '；', ' ', '\n', '\t').map { it.trim() }.filter { it.isNotEmpty() }
-        tokens.forEach { onAdd(it) }
+        splitTokens(input).forEach { onAdd(it) }
         input = ""
     }
 
@@ -89,7 +92,7 @@ fun ChipInputField(
     }
 }
 
-/** Selectable CPU core buttons that produce a compact mask ("0-6", "7", "4-6,7"). */
+/** Selectable CPU core buttons (or, in text-entry mode, a validated mask field). */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun CoreSelector(
@@ -97,11 +100,22 @@ fun CoreSelector(
     onMaskChange: (String) -> Unit,
     clusters: List<CpuClusterInfo> = emptyList(),
     coreCount: Int = 8,
-    single: Boolean = false,
+    textEntry: Boolean = false,
+    /**
+     * Highest core count the mask may reference, beyond the device's own cores:
+     * imported configs from a higher-core SoC keep their ids instead of having
+     * them silently trimmed by the buttons / rejected by the text field.
+     */
+    maskCoreLimit: Int = 0,
 ) {
     val colors = MiuixTheme.colorScheme
     val presentCount = clusters.flatMap { it.cpus }.maxOrNull()?.plus(1) ?: coreCount
-    val selected = remember(mask, presentCount) { parseCoreMask(mask, presentCount) }
+    val maskCount = maxOf(presentCount, maskCoreLimit)
+    val selected = remember(mask, maskCount) { parseCoreMask(mask, maskCount) }
+    if (textEntry) {
+        CoreTextInput(mask = mask, coreCount = maskCount, onMaskChange = onMaskChange)
+        return
+    }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (clusters.isNotEmpty()) {
             FlowRow(
@@ -119,11 +133,7 @@ fun CoreSelector(
                                 RoundedCornerShape(16.dp),
                             )
                             .clickable {
-                                val next = when {
-                                    single -> if (active) emptySet() else clusterSet
-                                    active -> selected - clusterSet
-                                    else -> selected + clusterSet
-                                }
+                                val next = if (active) selected - clusterSet else selected + clusterSet
                                 onMaskChange(buildCoreMask(next))
                             }
                             .padding(horizontal = 14.dp, vertical = 10.dp),
@@ -156,11 +166,7 @@ fun CoreSelector(
                                 CircleShape,
                             )
                             .clickable {
-                                val next = when {
-                                    single -> if (isSelected) emptySet() else setOf(core)
-                                    isSelected -> selected - core
-                                    else -> selected + core
-                                }
+                                val next = if (isSelected) selected - core else selected + core
                                 onMaskChange(buildCoreMask(next))
                             }
                             .padding(horizontal = 14.dp, vertical = 10.dp),
@@ -180,6 +186,63 @@ fun CoreSelector(
                 style = MiuixTheme.textStyles.footnote2,
                 color = colors.onSurfaceVariantSummary,
             )
+        }
+    }
+}
+
+private val CORE_TOKEN = Regex("\\d+\\s*-\\s*\\d+|\\d+")
+private val CORE_SEPARATOR = Regex("[,;\\s，；、]")
+
+/**
+ * Free-form core-mask input used when "手动输入核心掩码" is enabled. Accepts
+ * half/full-width separators (leniently converted to ","), ranges ("0-3") and
+ * spaces. Only canonical, in-range strings propagate to the draft; anything
+ * else stays in the field with an inline error hint.
+ */
+@Composable
+private fun CoreTextInput(
+    mask: String,
+    coreCount: Int,
+    onMaskChange: (String) -> Unit,
+) {
+    val colors = MiuixTheme.colorScheme
+    var text by remember(mask) { mutableStateOf(mask) }
+
+    fun canonical(v: String): String =
+        CORE_TOKEN.findAll(v).map { it.value.replace(" ", "").replace("\t", "") }.joinToString(",")
+
+    fun errorOf(v: String): String? {
+        val t = v.trim()
+        if (t.isEmpty()) return null
+        if (t.replace(CORE_TOKEN, "").replace(CORE_SEPARATOR, "").isNotEmpty()) {
+            return "格式应为 0-3,7：支持 , ; 空格分隔（全角自动转换）与 0-3 范围写法"
+        }
+        val nums = Regex("\\d+").findAll(t).map { it.value.toInt() }.toList()
+        if (nums.any { it < 0 || it >= coreCount }) return "核心编号需在 0–${coreCount - 1} 范围内"
+        return null
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        TextField(
+            value = text,
+            onValueChange = { raw ->
+                // Lenient input: full-width commas/semicolons/dashes become ASCII.
+                val v = raw.replace('，', ',').replace('、', ',').replace('；', ';').replace('－', '-')
+                val err = errorOf(v)
+                if (err == null) {
+                    val canon = canonical(v)
+                    text = canon
+                    onMaskChange(canon)
+                } else {
+                    text = v
+                }
+            },
+            label = "核心掩码（如 0-3,7）",
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        errorOf(text)?.let { err ->
+            Text(err, style = MiuixTheme.textStyles.footnote2, color = colors.error)
         }
     }
 }

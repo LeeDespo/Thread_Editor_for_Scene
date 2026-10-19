@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -22,10 +23,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn as VertLazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -35,6 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import com.scenepreset.editor.data.ThreadEditorContext
+import com.scenepreset.editor.model.CategoriesCodec
 import com.scenepreset.editor.model.CategoryRule
 import com.scenepreset.editor.model.SceneVersion
 import com.scenepreset.editor.model.ThreadRule
@@ -51,14 +53,13 @@ import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TopAppBar
+import top.yukonga.miuix.kmp.basic.TopAppBarState
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Back
-import top.yukonga.miuix.kmp.icon.extended.Info
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.window.WindowBottomSheet
-import top.yukonga.miuix.kmp.window.WindowDialog
 
 @Composable
 fun ImportExportScreen(
@@ -66,19 +67,24 @@ fun ImportExportScreen(
     rules: List<ThreadRule>,
     categories: List<CategoryRule>,
     sceneVersion: SceneVersion,
-    rulesJson: String,
-    categoriesJson: String,
     onImportRules: (String, Boolean) -> Unit,
     onImportCategories: (String, Boolean) -> Unit,
     onMessage: (String) -> Unit,
     onBack: () -> Unit,
 ) {
-    var showInfo by remember { mutableStateOf(false) }
+    // Encoding the full rule set is O(rules) JSON work — do it once per list
+    // change here instead of on every recomposition from the app shell.
+    val rulesJson = remember(rules, sceneVersion) { ThreadsCodec.encode(rules, sceneVersion) }
+    val categoriesJson = remember(categories) { CategoriesCodec.encode(categories) }
     var showRuleExport by remember { mutableStateOf(false) }
-    val scrollBehavior = MiuixScrollBehavior()
+    val listState = rememberLazyListState()
+    val scrollBehavior = MiuixScrollBehavior(
+        state = remember { TopAppBarState(-Float.MAX_VALUE, 0f, 0f) },
+        canScroll = { listState.canScrollForward || listState.canScrollBackward },
+    )
 
     Scaffold(
-        contentWindowInsets = contentInsetsTopOnly,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = "导入 / 导出",
@@ -89,17 +95,17 @@ fun ImportExportScreen(
                         Icon(MiuixIcons.Back, contentDescription = "返回")
                     }
                 },
-                actions = {
-                    IconButton(onClick = { showInfo = true }) {
-                        Icon(MiuixIcons.Info, contentDescription = "说明")
-                    }
-                },
                 scrollBehavior = scrollBehavior,
             )
         },
     ) { padding ->
+        Box(Modifier.fillMaxSize().padding(padding)) {
         LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(padding).nestedScroll(scrollBehavior.nestedScrollConnection).overScrollVertical(),
+            state = listState,
+            modifier = Modifier
+                .fillMaxSize()
+                .nestedScroll(scrollBehavior.nestedScrollConnection)
+                .overScrollVertical(),
             contentPadding = PaddingValues(bottom = 24.dp),
         ) {
             item { SmallTitle("线程规则 threads.json") }
@@ -162,8 +168,9 @@ fun ImportExportScreen(
                 ) {
                     Text(
                         "导入或导出时会自动检测配置文件的 Scene 版本。若与当前所选版本不同，将进行自适应转换（尽力而为），转换可能会丢失某些配置信息，实际效果可能不佳。\n\n" +
-                            "导入的核心数与本机不同时，会询问原机的 CPU 架构（从强到弱每档核心数）。选择自适应转化后，文件中的核心掩码会按原机各档归档，再映射到本机同档的核心簇；" +
-                            "若不想转换，也可以到「更多 → 自定义核心 / 核心簇」把本机核心数改为与文件一致后按原样导入。\n\n" +
+                            "导入时会询问该文件对应芯片的 CPU 架构（从强到弱每档核心数），报的是文件所属机型/芯片的档位，不是你本机的。选择自适应转化后，文件中的核心掩码会按原机各档归档，再映射到本机同档核心簇；" +
+                            "也可以直接按原样导入，核数与本机不一致不会阻止导入。若文件引用的核心编号超出本机核心数，应用会自动开启「手动输入核心掩码」，以免这些编号被丢掉；" +
+                            "本机核心数不少于文件引用数时才可自行关闭该开关。\n\n" +
                             "导入的规则与类目先暂存在应用内，确认无误后点击列表页的保存按钮才会写入文件。",
                         style = MiuixTheme.textStyles.footnote1,
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
@@ -171,6 +178,11 @@ fun ImportExportScreen(
                     )
                 }
             }
+        }
+        TopScrim(
+            Modifier.align(Alignment.TopCenter),
+            strength = { barFadeStrength(scrollBehavior.state.collapsedFraction) },
+        )
         }
     }
 
@@ -191,20 +203,6 @@ fun ImportExportScreen(
         },
         onDismiss = { showRuleExport = false },
     )
-
-    WindowDialog(show = showInfo, onDismissRequest = { showInfo = false }) {
-        Column(Modifier.fillMaxWidth().padding(20.dp)) {
-            Text("导入 / 导出说明", style = MiuixTheme.textStyles.title3)
-            Text(
-                "导入或导出时会自动检测配置文件的 Scene 版本。若与当前所选版本不同，将进行自适应转换（尽力而为），转换可能会丢失某些配置信息，实际效果可能不佳。",
-                style = MiuixTheme.textStyles.footnote1,
-                color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
-            )
-            Button(onClick = { showInfo = false }, modifier = Modifier.fillMaxWidth()) {
-                Text("知道了", style = MiuixTheme.textStyles.button)
-            }
-        }
-    }
 }
 
 /**
@@ -282,7 +280,7 @@ private fun RuleExportSheet(
                 )
             }
             Spacer(Modifier.height(4.dp))
-            VertLazyColumn(modifier = Modifier.fillMaxWidth().height(340.dp)) {
+            LazyColumn(modifier = Modifier.fillMaxWidth().height(340.dp)) {
                 items(shown, key = { it.first }) { (index, rule) ->
                     val isSelected = index in selected
                     Row(

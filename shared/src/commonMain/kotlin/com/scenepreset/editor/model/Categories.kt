@@ -21,10 +21,11 @@ data class CategoryRule(
     val activities: List<String>? = null,
 ) {
     val displayName: String
-        get() = friendly.ifBlank { category.ifBlank { categoriesFirstOrNull() } }
-
-    private fun categoriesFirstOrNull(): String =
-        (packages?.firstOrNull() ?: activities?.firstOrNull()).orEmpty()
+        get() = friendly.ifBlank {
+            category.ifBlank {
+                (packages?.firstOrNull() ?: activities?.firstOrNull()).orEmpty().ifBlank { "未命名类目" }
+            }
+        }
 
     fun normalized(): CategoryRule = copy(
         packages = packages?.takeIf { it.isNotEmpty() },

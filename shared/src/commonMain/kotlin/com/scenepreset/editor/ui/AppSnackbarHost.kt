@@ -43,7 +43,6 @@ private const val SNACKBAR_MS = 4000L
 fun AppSnackbarHost(
     message: String?,
     onShown: () -> Unit,
-    onDelete: () -> Unit = onShown,
     actionLabel: String? = null,
     onAction: () -> Unit = {},
 ) {
@@ -96,7 +95,7 @@ fun AppSnackbarHost(
                     modifier = Modifier
                         .size(28.dp)
                         .background(colors.secondaryVariant.copy(alpha = 0.15f), CircleShape)
-                        .clickable(onClick = onDelete),
+                        .clickable(onClick = onShown),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(

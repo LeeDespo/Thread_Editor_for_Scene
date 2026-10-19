@@ -13,31 +13,34 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -46,6 +49,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -62,7 +66,6 @@ import com.scenepreset.editor.model.ruleEffectivePackages
 import com.scenepreset.editor.model.hasWildcardPackage
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardColors
-import top.yukonga.miuix.kmp.basic.FloatingActionButton
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
@@ -70,13 +73,10 @@ import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.basic.TopAppBar
+import top.yukonga.miuix.kmp.basic.TopAppBarState
 import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.extended.Add
-import top.yukonga.miuix.kmp.icon.extended.Clear
-import top.yukonga.miuix.kmp.icon.extended.Download
-import top.yukonga.miuix.kmp.icon.extended.Close
-import top.yukonga.miuix.kmp.icon.extended.Share
 import top.yukonga.miuix.kmp.icon.extended.Delete
+import top.yukonga.miuix.kmp.icon.extended.Search
 import top.yukonga.miuix.kmp.icon.extended.Undo
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -108,185 +108,200 @@ fun HomeScreen(
     onDismissConflicts: () -> Unit,
 ) {
     var appManifest by remember { mutableStateOf<AppManifest?>(null) }
-    val scrollBehavior = MiuixScrollBehavior()
+    // Search lives in the app bar: a large circle rides the large title and
+    // shrinks into the collapsed bar; activating it clears the titles and
+    // expands a search field pinned below the bar.
+    var searchActive by remember { mutableStateOf(query.isNotEmpty()) }
+    val listState = rememberLazyListState()
+    // Non-saveable bar state: a restored collapsed offset would fight the
+    // frozen expanded content padding (and short tabs could never scroll it
+    // back open).
+    val scrollBehavior = MiuixScrollBehavior(
+        state = remember { TopAppBarState(-Float.MAX_VALUE, 0f, 0f) },
+        canScroll = { listState.canScrollForward || listState.canScrollBackward },
+    )
+    val canScrollState by androidx.compose.runtime.derivedStateOf {
+        listState.canScrollForward || listState.canScrollBackward
+    }
+    // A short page cannot scroll the bar through its collapse animation, so a
+    // mid-collapse offset would stick forever (and leave both search buttons
+    // visible at partial alpha). Force full expansion whenever scrolling is
+    // impossible.
+    androidx.compose.runtime.LaunchedEffect(canScrollState) {
+        if (!canScrollState) scrollBehavior.state.heightOffset = 0f
+    }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = "线程",
-                largeTitle = "线程",
-                subtitle = "共 ${rules.size} 条线程规则",
-                navigationIcon = {},
-                actions = {},
-                scrollBehavior = scrollBehavior,
-            )
-        },
-        contentWindowInsets = contentInsetsTopOnly,
-        floatingActionButton = {
-            // Constant-size bottom-anchored overlay: the export stack and the
-            // normal stack occupy the same slot; only opacity + translation
-            // animate, so nothing jumps when entering/leaving export mode.
-            Box(contentAlignment = Alignment.BottomEnd) {
-                AnimatedVisibility(
-                    visible = !exportMode,
-                    enter = fadeIn() + slideInVertically { it },
-                    exit = fadeOut() + slideOutVertically { it },
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.End,
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        AnimatedVisibility(
-                            visible = dirty,
-                            enter = fadeIn() + slideInVertically { it / 2 },
-                            exit = fadeOut() + slideOutVertically { it / 2 },
-                        ) {
-                            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                CircularActionButton(
-                                    icon = MiuixIcons.Download,
-                                    tint = MiuixTheme.colorScheme.onPrimary,
-                                    bg = MiuixTheme.colorScheme.primary,
-                                    onClick = onSave,
-                                )
-                                CircularActionButton(
-                                    icon = MiuixIcons.Undo,
-                                    tint = MiuixTheme.colorScheme.onSecondaryContainer,
-                                    bg = MiuixTheme.colorScheme.secondaryContainer,
-                                    onClick = onRestore,
+    Box(Modifier.fillMaxSize()) {
+        Scaffold(
+            contentWindowInsets = WindowInsets(0, 0, 0, 0),
+            topBar = {
+                TopAppBar(
+                    title = if (searchActive) "" else "线程",
+                    largeTitle = if (searchActive) "" else "线程",
+                    subtitle = if (searchActive) "" else "共 ${rules.size} 条线程规则",
+                    navigationIcon = {},
+                    actions = {
+                        if (!searchActive) {
+                            Box(
+                                Modifier.graphicsLayer {
+                                    alpha = ((scrollBehavior.state.collapsedFraction - 0.2f) * 4f).coerceIn(0f, 1f)
+                                },
+                            ) {
+                                CircularIconAction(
+                                    icon = MiuixIcons.Search,
+                                    contentDescription = "搜索",
+                                    onClick = { searchActive = true },
                                 )
                             }
                         }
-                        FloatingActionButton(onClick = onAdd) {
-                            Icon(MiuixIcons.Add, contentDescription = "添加规则")
+                    },
+                        scrollBehavior = scrollBehavior,
+                    bottomContent = {
+                        AnimatedVisibility(
+                            visible = searchActive,
+                            enter = expandVertically() + fadeIn(),
+                            exit = shrinkVertically() + fadeOut(),
+                        ) {
+                            SearchFieldRow(
+                                query = query,
+                                onQueryChange = onQueryChange,
+                                onClose = {
+                                    searchActive = false
+                                    onQueryChange("")
+                                },
+                            )
+                        }
+                    },
+                )
+            },
+            floatingActionButton = {
+                HomeFabStack(
+                    exportMode = exportMode,
+                    dirty = dirty,
+                    addLabel = "添加规则",
+                    onSave = onSave,
+                    onRestore = onRestore,
+                    onAdd = onAdd,
+                    onExitExport = onExitExport,
+                    onExportSelected = { onExport(selectedForExport.mapNotNull { rules.getOrNull(it) }) },
+                )
+            },
+        ) { padding ->
+            Column(Modifier.fillMaxSize().padding(padding)) {
+                HomeFilterSegment(
+                    filter = homeFilter,
+                    onSelect = onHomeFilterChange,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                )
+                AnimatedContent(
+                    targetState = homeFilter,
+                    transitionSpec = {
+                        if (initialState == RuleFilter.Default && targetState == RuleFilter.Advanced) {
+                            (slideInHorizontally { it } + fadeIn()) togetherWith
+                                (slideOutHorizontally { -it } + fadeOut())
+                        } else {
+                            (slideInHorizontally { -it } + fadeIn()) togetherWith
+                                (slideOutHorizontally { it } + fadeOut())
+                        }
+                    },
+                    modifier = Modifier.weight(1f),
+                    label = "homeFilter",
+                ) { filter ->
+                    val shown = remember(filter, rules, query, categories, context) {
+                        rules.mapIndexed { index, rule -> index to rule }
+                            .filter { (_, rule) ->
+                                val typeOk = if (filter == RuleFilter.Advanced) rule.isGame else !rule.isGame
+                                typeOk && (
+                                    query.isBlank() ||
+                                        rule.displayName.contains(query, true) ||
+                                        ruleEffectivePackages(rule, categories).any { pkg ->
+                                            pkg.contains(query, true) || context.resolveApp(pkg).label.contains(query, true)
+                                        } ||
+                                        ruleCategoryLabels(rule, categories).any { (id, label) ->
+                                            id.contains(query, true) || label.contains(query, true)
+                                        }
+                                    )
+                            }
+                            .sortedWith(
+                                compareBy<Pair<Int, ThreadRule>> {
+                                    if (it.second.hasWildcardPackage()) 2 else if (it.second.isGame) 1 else 0
+                                }.thenBy { it.first },
+                            )
+                    }
+                    // Pre-resolve every card's derived data once per list change so
+                    // RuleCard no longer recomputes catLabels/packages (and icon
+                    // LRU lookups) on every recomposition while flinging.
+                    val cardData = remember(shown, categories, context) {
+                        shown.map { (index, rule) ->
+                            RuleCardData(
+                                index = index,
+                                rule = rule,
+                                catLabels = ruleCategoryLabels(rule, categories),
+                                packages = ruleEffectivePackages(rule, categories),
+                                entries = ruleEffectivePackages(rule, categories).map { context.resolveApp(it) },
+                            )
                         }
                     }
-                }
-                AnimatedVisibility(
-                    visible = exportMode,
-                    enter = fadeIn() + slideInVertically { it },
-                    exit = fadeOut() + slideOutVertically { it },
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.End,
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    BoxWithConstraints(Modifier.fillMaxSize()) {
+                    val shortList = shown.size <= 4
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .nestedScroll(scrollBehavior.nestedScrollConnection)
+                            .exportLongPress(enabled = { !exportMode }) {
+                                if (dirty) onBlockedExport() else onEnterExport()
+                            }
+                            .edgeFade(top = 22.dp, topStrength = { barFadeStrength(scrollBehavior.state.collapsedFraction) }),
+                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp,
+                            bottom = if (shortList) maxHeight else 240.dp),
+                        verticalArrangement = Arrangement.spacedBy(14.dp),
                     ) {
-                        CircularActionButton(
-                            icon = MiuixIcons.Close,
-                            tint = MiuixTheme.colorScheme.onSecondaryContainer,
-                            bg = MiuixTheme.colorScheme.secondaryContainer,
-                            onClick = onExitExport,
-                        )
-                        CircularActionButton(
-                            icon = MiuixIcons.Share,
-                            tint = MiuixTheme.colorScheme.onPrimary,
-                            bg = MiuixTheme.colorScheme.primary,
-                            onClick = { onExport(selectedForExport.mapNotNull { rules.getOrNull(it) }) },
-                        )
+                        if (initialLoading) {
+                            item { LoadingHint() }
+                        } else if (shown.isEmpty()) {
+                            item { EmptyHint(hasQuery = query.isNotBlank()) }
+                        }
+                        items(
+                            items = cardData,
+                            key = { it.index },
+                            contentType = { "rule" },
+                        ) { card ->
+                            RuleCard(
+                                rule = card.rule,
+                                catLabels = card.catLabels,
+                                packages = card.packages,
+                                entries = card.entries,
+                                disabled = card.index in disabled,
+                                exportMode = exportMode,
+                                selected = card.index in selectedForExport,
+                                selectable = ruleSelectable(card.rule),
+                                onEdit = { onEdit(card.index) },
+                                onToggleDisabled = { onToggleDisabled(card.index) },
+                                onShowAppList = { appManifest = buildAppManifest(card.rule, categories) },
+                                onToggleSelect = { onToggleSelect(card.index) },
+                            )
+                        }
+                    }
                     }
                 }
             }
-        },
-    ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
-            SearchField(
-                query = query,
-                onQueryChange = onQueryChange,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-            )
-            HomeFilterSegment(
-                filter = homeFilter,
-                onSelect = onHomeFilterChange,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp),
-            )
-            AnimatedContent(
-                targetState = homeFilter,
-                transitionSpec = {
-                    if (initialState == RuleFilter.Default && targetState == RuleFilter.Advanced) {
-                        (slideInHorizontally { it } + fadeIn()) togetherWith
-                            (slideOutHorizontally { -it } + fadeOut())
-                    } else {
-                        (slideInHorizontally { -it } + fadeIn()) togetherWith
-                            (slideOutHorizontally { it } + fadeOut())
-                    }
-                },
-                modifier = Modifier.weight(1f),
-                label = "homeFilter",
-            ) { filter ->
-                val shown = remember(filter, rules, query, categories, context) {
-                    rules.mapIndexed { index, rule -> index to rule }
-                        .filter { (_, rule) ->
-                            val typeOk = if (filter == RuleFilter.Advanced) rule.isGame else !rule.isGame
-                            typeOk && (
-                                query.isBlank() ||
-                                    rule.displayName.contains(query, true) ||
-                                    ruleEffectivePackages(rule, categories).any { pkg ->
-                                        pkg.contains(query, true) || context.resolveApp(pkg).label.contains(query, true)
-                                    } ||
-                                    ruleCategoryLabels(rule, categories).any { (id, label) ->
-                                        id.contains(query, true) || label.contains(query, true)
-                                    }
-                                )
-                        }
-                        .sortedWith(
-                            compareBy<Pair<Int, ThreadRule>> {
-                                if (it.second.hasWildcardPackage()) 2 else if (it.second.isGame) 1 else 0
-                            }.thenBy { it.first },
-                        )
-                }
-                // Pre-resolve every card's derived data once per list change so
-                // RuleCard no longer recomputes catLabels/packages (and icon
-                // LRU lookups) on every recomposition while flinging.
-                val cardData = remember(shown, categories, context) {
-                    shown.map { (index, rule) ->
-                        RuleCardData(
-                            index = index,
-                            rule = rule,
-                            catLabels = ruleCategoryLabels(rule, categories),
-                            packages = ruleEffectivePackages(rule, categories),
-                            entries = ruleEffectivePackages(rule, categories).map { context.resolveApp(it) },
-                        )
-                    }
-                }
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .nestedScroll(scrollBehavior.nestedScrollConnection)
-                        .exportLongPress(enabled = { !exportMode }) {
-                            if (dirty) onBlockedExport() else onEnterExport()
-                        },
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 200.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp),
-                ) {
-                    if (initialLoading) {
-                        item { LoadingHint() }
-                    } else if (shown.isEmpty()) {
-                        item { EmptyHint(hasQuery = query.isNotBlank()) }
-                    }
-                    items(
-                        items = cardData,
-                        key = { it.index },
-                        contentType = { "rule" },
-                    ) { card ->
-                        RuleCard(
-                            rule = card.rule,
-                            catLabels = card.catLabels,
-                            packages = card.packages,
-                            entries = card.entries,
-                            disabled = card.index in disabled,
-                            exportMode = exportMode,
-                            selected = card.index in selectedForExport,
-                            selectable = ruleSelectable(card.rule),
-                            onEdit = { onEdit(card.index) },
-                            onToggleDisabled = { onToggleDisabled(card.index) },
-                            onShowAppList = { appManifest = buildAppManifest(card.rule, categories) },
-                            onToggleSelect = { onToggleSelect(card.index) },
-                        )
-                    }
-                }
+        }
+        if (!searchActive) {
+            Box(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .statusBarsPadding()
+                    .padding(top = 52.dp, end = 16.dp)
+                    .graphicsLayer {
+                        val f = scrollBehavior.state.collapsedFraction
+                        alpha = (1f - f * 5f).coerceIn(0f, 1f)
+                        translationY = scrollBehavior.state.heightOffset
+                    },
+            ) {
+                LargeSearchButton(onClick = { searchActive = true })
             }
         }
     }
@@ -303,30 +318,6 @@ fun HomeScreen(
         show = conflicts != null,
         conflicts = conflicts.orEmpty(),
         onDismiss = onDismissConflicts,
-    )
-}
-
-@Composable
-private fun SearchField(
-    query: String,
-    onQueryChange: (String) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    TextField(
-        value = query,
-        onValueChange = onQueryChange,
-        label = "搜索规则名称 / 包名 / 应用名 / 类目",
-        singleLine = true,
-        trailingIcon = if (query.isNotEmpty()) {
-            {
-                IconButton(onClick = { onQueryChange("") }) {
-                    Icon(MiuixIcons.Clear, contentDescription = "清除")
-                }
-            }
-        } else {
-            null
-        },
-        modifier = modifier,
     )
 }
 

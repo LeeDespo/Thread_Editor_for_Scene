@@ -148,6 +148,9 @@ fun EditScreen(
     context: ThreadEditorContext,
     showSystemApps: Boolean,
     version: SceneVersion,
+    coreTextEntry: Boolean = false,
+    /** Highest core count the mask fields must accept: the file may reference cores this device lacks. */
+    maskCoreLimit: Int = 0,
     onBack: () -> Unit,
     onCommit: (ThreadRule) -> Unit,
 ) {
@@ -189,17 +192,33 @@ fun EditScreen(
             floatingActionButton = {
                 FloatingActionButton(onClick = {
                     val candidate = draft.toRule(version).normalized(version)
-                    val conflicts = findIntraRuleConflicts(candidate, allCategories)
-                    if (conflicts.isNotEmpty()) commitConflicts = conflicts else onCommit(candidate)
+                    val hasTargets = !candidate.packages.isNullOrEmpty() || !candidate.categories.isNullOrEmpty()
+                    val hasBinding = candidate.cpuset != null || candidate.appCpuset != null
+                    when {
+                        // A rule without packages/categories matches nothing, and one
+                        // without any core field does nothing — block both at commit.
+                        !hasTargets -> info = FieldInfo(
+                            "无法保存",
+                            "请至少添加一个应用包名或类目，否则规则不会匹配任何应用。",
+                        )
+                        !hasBinding -> info = FieldInfo(
+                            "无法保存",
+                            "请至少配置一项核心分配（主线程 / 渲染线程 / 重载线程 / comm / 其它线程均可），否则该规则没有实际作用。",
+                        )
+                        else -> {
+                            val conflicts = findIntraRuleConflicts(candidate, allCategories)
+                            if (conflicts.isNotEmpty()) commitConflicts = conflicts else onCommit(candidate)
+                        }
+                    }
                 }) {
                     Icon(MiuixIcons.Download, contentDescription = "保存")
                 }
             },
         ) { padding ->
+            Box(Modifier.fillMaxSize().padding(padding)) {
             Column(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
+                    .fillMaxSize(),
             ) {
                 Box(
                     Modifier
@@ -222,9 +241,10 @@ fun EditScreen(
                     )
                 }
 
+                Box(Modifier.weight(1f)) {
                 HorizontalPager(
                     state = pagerState,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.fillMaxSize(),
                 ) { page ->
                     Column(
                         modifier = Modifier
@@ -259,15 +279,18 @@ fun EditScreen(
                         }
 
                         if (page == 0) {
-                            AppGroups(draft = draft, clusters = clusters, version = version, onInfo = { info = it })
+                            AppGroups(draft = draft, clusters = clusters, version = version, textEntry = coreTextEntry, maskCoreLimit = maskCoreLimit, onInfo = { info = it })
                         } else {
-                            GameGroups(draft = draft, clusters = clusters, version = version, onInfo = { info = it })
+                            GameGroups(draft = draft, clusters = clusters, version = version, textEntry = coreTextEntry, maskCoreLimit = maskCoreLimit, onInfo = { info = it })
                         }
                         // Bottom whitespace so the FAB never covers the last card.
                         Spacer(Modifier.height(96.dp))
                     }
                 }
+                TopScrim(Modifier.align(Alignment.TopCenter))
+                }
             }
+        }
         }
 
         InfoDialog(
@@ -308,7 +331,7 @@ fun EditScreen(
 }
 
 @Composable
-private fun GameGroups(draft: DraftState, clusters: List<CpuClusterInfo>, version: SceneVersion, onInfo: (FieldInfo) -> Unit) {
+private fun GameGroups(draft: DraftState, clusters: List<CpuClusterInfo>, version: SceneVersion, textEntry: Boolean, maskCoreLimit: Int, onInfo: (FieldInfo) -> Unit) {
     val colors = MiuixTheme.colorScheme
     if (version == SceneVersion.SceneN1) {
         GroupCard("负载最重的线程", colors.primary) {
@@ -316,12 +339,12 @@ private fun GameGroups(draft: DraftState, clusters: List<CpuClusterInfo>, versio
                 { draft.heaviestThreads = draft.heaviestThreads - it }, "heaviest_thread",
                 "指定负载最重的线程名。可指定多个。Scene 会对这些线程进行额外优化：可能提升 L2/L3 缓存使用优先级；提高线程优先级；与 FAS、辅助调速器进行联动，优化表现。", onInfo)
             CoreField("分配核心", draft.heaviestCores, { draft.heaviestCores = it }, "heaviest_cores",
-                "指定负载最重的线程使用的 CPU 核心。", onInfo, clusters = clusters)
+                "指定负载最重的线程使用的 CPU 核心。", onInfo, clusters = clusters, textEntry = textEntry, maskCoreLimit = maskCoreLimit)
         }
     } else {
         GroupCard("Unity 主线程核心", colors.primary) {
             CoreField("UnityMain 核心", draft.unityMain, { draft.unityMain = it }, "unity_main",
-                "UnityMain 线程可以使用的 CPU 核心。如果进程中存在多个 UnityMain 线程，则只会命中负载最高的那一个。", onInfo, clusters = clusters)
+                "UnityMain 线程可以使用的 CPU 核心。如果进程中存在多个 UnityMain 线程，则只会命中负载最高的那一个。", onInfo, clusters = clusters, textEntry = textEntry, maskCoreLimit = maskCoreLimit)
         }
     }
     GroupCard("重载线程", colors.primary) {
@@ -329,11 +352,11 @@ private fun GameGroups(draft: DraftState, clusters: List<CpuClusterInfo>, versio
             { draft.heavyThreads = draft.heavyThreads - it }, "heavy_thread",
             "指定重载进程的线程名。可指定多个。不可与负载最重线程重复。Scene 会对这些线程进行额外优化：可能提升 L2/L3 缓存使用优先级；提高线程优先级；与 FAS、辅助调速器进行联动，优化表现。", onInfo)
         CoreField("分配核心", draft.heavyCores, { draft.heavyCores = it }, "heavy_cores",
-            "指定重载线程使用的 CPU 核心。", onInfo, clusters = clusters)
+            "指定重载线程使用的 CPU 核心。", onInfo, clusters = clusters, textEntry = textEntry, maskCoreLimit = maskCoreLimit)
     }
     GroupCard("主线程", colors.primary) {
         CoreField("主线程核心", draft.mainThread, { draft.mainThread = it }, "main_thread",
-            "指定应用主线程使用的 CPU 核心。", onInfo, single = true, clusters = clusters)
+            "指定应用主线程使用的 CPU 核心，可绑定多个（如 1-5）。", onInfo, clusters = clusters, textEntry = textEntry, maskCoreLimit = maskCoreLimit)
     }
     GroupCard("comm", colors.primary) {
         draft.commEntries.forEachIndexed { index, entry ->
@@ -366,6 +389,8 @@ private fun GameGroups(draft: DraftState, clusters: List<CpuClusterInfo>, versio
                     CoreSelector(
                         mask = entry.coreMask,
                         clusters = clusters,
+                        textEntry = textEntry,
+                        maskCoreLimit = maskCoreLimit,
                         onMaskChange = { mask ->
                             draft.commEntries = draft.commEntries.map {
                                 if (it == entry) it.copy(coreMask = mask) else it
@@ -386,7 +411,7 @@ private fun GameGroups(draft: DraftState, clusters: List<CpuClusterInfo>, versio
     }
     GroupCard("其它线程", colors.primary) {
         CoreField("其它线程核心", draft.gameOther, { draft.gameOther = it }, "other",
-            "未被核心分配规则命中的线程，运行于此核心范围。", onInfo, clusters = clusters)
+            "未被核心分配规则命中的线程，运行于此核心范围。", onInfo, clusters = clusters, textEntry = textEntry, maskCoreLimit = maskCoreLimit)
     }
     GroupCard("调度", colors.primary) {
         ChipInputField("垃圾线程 trashy", draft.trashy, { draft.trashy = draft.trashy + it },
@@ -406,19 +431,19 @@ private fun GameGroups(draft: DraftState, clusters: List<CpuClusterInfo>, versio
 }
 
 @Composable
-private fun AppGroups(draft: DraftState, clusters: List<CpuClusterInfo>, version: SceneVersion, onInfo: (FieldInfo) -> Unit) {
+private fun AppGroups(draft: DraftState, clusters: List<CpuClusterInfo>, version: SceneVersion, textEntry: Boolean, maskCoreLimit: Int, onInfo: (FieldInfo) -> Unit) {
     val colors = MiuixTheme.colorScheme
     GroupCard("主线程", colors.primary) {
         CoreField("主线程核心", draft.appMain, { draft.appMain = it }, "main",
-            "指定应用主线程使用的 CPU 核心。", onInfo, clusters = clusters)
+            "指定应用主线程使用的 CPU 核心。", onInfo, clusters = clusters, textEntry = textEntry, maskCoreLimit = maskCoreLimit)
     }
     GroupCard("渲染线程", colors.primary) {
         CoreField("渲染线程核心", draft.appRender, { draft.appRender = it }, "render",
-            "指定应用渲染线程（RenderThread）使用的 CPU 核心。", onInfo, clusters = clusters)
+            "指定应用渲染线程（RenderThread）使用的 CPU 核心。", onInfo, clusters = clusters, textEntry = textEntry, maskCoreLimit = maskCoreLimit)
     }
     GroupCard("其它线程", colors.primary) {
         CoreField("其它线程核心", draft.appOther, { draft.appOther = it }, "other",
-            "指定除主线程与渲染线程外，其余线程使用的 CPU 核心。", onInfo, clusters = clusters)
+            "指定除主线程与渲染线程外，其余线程使用的 CPU 核心。", onInfo, clusters = clusters, textEntry = textEntry, maskCoreLimit = maskCoreLimit)
     }
     if (version != SceneVersion.Scene8) {
         GroupCard("检测范围", colors.primary) {
@@ -438,19 +463,20 @@ private fun CoreField(
     infoTitle: String,
     infoText: String,
     onInfo: (FieldInfo) -> Unit,
-    single: Boolean = false,
     clusters: List<CpuClusterInfo> = emptyList(),
+    textEntry: Boolean = false,
+    maskCoreLimit: Int = 0,
 ) {
     val colors = MiuixTheme.colorScheme
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             FieldLabel(label, Modifier.weight(1f))
-            if (mask.isNotBlank()) {
+            if (!textEntry && mask.isNotBlank()) {
                 Text(mask, style = MiuixTheme.textStyles.footnote2, color = colors.primary)
             }
             InfoButton(title = infoTitle, text = infoText, onInfo = onInfo)
         }
-        CoreSelector(mask = mask, clusters = clusters, onMaskChange = onMaskChange, single = single)
+        CoreSelector(mask = mask, clusters = clusters, onMaskChange = onMaskChange, textEntry = textEntry, maskCoreLimit = maskCoreLimit)
     }
 }
 

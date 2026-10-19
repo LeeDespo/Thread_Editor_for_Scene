@@ -127,10 +127,10 @@ fun TopologyScreen(
             }
         },
     ) { padding ->
+        Box(Modifier.fillMaxSize().padding(padding)) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -189,7 +189,10 @@ fun TopologyScreen(
             // Bottom whitespace for the FABs.
             Spacer(Modifier.height(96.dp))
         }
+        TopScrim(Modifier.align(Alignment.TopCenter))
+        }
     }
+
 
     if (showFirstUse) {
         // Countdown forces the warning to be read before it can be dismissed.

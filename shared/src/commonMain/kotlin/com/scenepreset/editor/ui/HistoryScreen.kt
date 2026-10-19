@@ -66,7 +66,8 @@ fun HistoryScreen(
             )
         },
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
+        Box(Modifier.fillMaxSize().padding(padding)) {
+        Column(Modifier.fillMaxSize()) {
             SegmentedControl(
                 items = HistoryTab.entries.map { it.label },
                 selectedIndex = tab.ordinal,
@@ -105,6 +106,8 @@ fun HistoryScreen(
                     }
                 }
             }
+        }
+        TopScrim(Modifier.align(Alignment.TopCenter))
         }
     }
 }

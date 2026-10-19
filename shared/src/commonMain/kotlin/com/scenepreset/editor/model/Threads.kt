@@ -125,9 +125,6 @@ object ThreadsCodec {
         json.encodeToString(orderRules(rules).map { it.normalized(version) })
 }
 
-/** Scene-facing alias for a single thread preset rule. */
-typealias PresetRule = ThreadRule
-
 /**
  * The packages a rule actually covers: its own `packages` plus every package of
  * the categories it references (from categories.json).

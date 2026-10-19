@@ -313,7 +313,7 @@ fun PackagePickerDialog(
 
     // Accept half- and full-width separators for user convenience.
     fun addMany(raw: String) {
-        raw.split(',', '，', ';', '；', ' ', '\n', '\t').map { it.trim() }.filter { it.isNotEmpty() }.forEach { addOne(it) }
+        splitTokens(raw).forEach { addOne(it) }
     }
 
     // Preselected apps lead the unfiltered list so they are reachable without
@@ -489,7 +489,7 @@ fun CategoryPickerDialog(
     }
 
     fun addMany(raw: String) {
-        raw.split(',', '，', ';', '；', ' ', '\n', '\t').map { it.trim() }.filter { it.isNotEmpty() }.forEach { addOne(it) }
+        splitTokens(raw).forEach { addOne(it) }
     }
 
     val filtered = remember(query, allCategories) {
@@ -602,14 +602,14 @@ fun CategoryPickerDialog(
     }
 }
 
-/** A removable token chip with a colored block and rounded corners. */
+/** A removable token chip with a colored block and rounded corners (accent style). */
 @Composable
 fun Chip(label: String, onRemove: () -> Unit) {
     val colors = MiuixTheme.colorScheme
     Box(
         modifier = Modifier
             .clip(CircleShape)
-            .background(colors.secondaryContainer, CircleShape)
+            .background(colors.primaryContainer, CircleShape)
             .clickable(onClick = onRemove)
             .padding(horizontal = 12.dp, vertical = 7.dp),
     ) {
@@ -617,13 +617,13 @@ fun Chip(label: String, onRemove: () -> Unit) {
             Text(
                 label,
                 style = MiuixTheme.textStyles.footnote1,
-                color = colors.onSecondaryContainer,
+                color = colors.onPrimaryContainer,
             )
             Spacer(Modifier.width(6.dp))
             Text(
                 "✕",
                 style = MiuixTheme.textStyles.footnote1,
-                color = colors.onSecondaryContainer.copy(alpha = 0.7f),
+                color = colors.onPrimaryContainer.copy(alpha = 0.7f),
             )
         }
     }
@@ -662,8 +662,9 @@ fun SaveMetaDialog(
     onDismiss: () -> Unit,
 ) {
     val colors = MiuixTheme.colorScheme
-    var name by remember { mutableStateOf("") }
-    var note by remember { mutableStateOf("") }
+    // Keyed on show: reopening the dialog starts from a clean name/note.
+    var name by remember(show) { mutableStateOf("") }
+    var note by remember(show) { mutableStateOf("") }
     WindowDialog(show = show, onDismissRequest = onDismiss) {
         Column(
             modifier = Modifier

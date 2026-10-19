@@ -18,6 +18,8 @@ data class AppSettings(
     val scenePath: String = "/data/user/0/com.omarea.vtools/files",
     val sceneVersion: SceneVersion = SceneVersion.SceneN1,
     val showSystemApps: Boolean = false,
+    /** Edit screens use a mask text field instead of core buttons when true. */
+    val coreTextEntry: Boolean = false,
 )
 
 val PresetKeyColors: List<Pair<String, Color>> = listOf(
