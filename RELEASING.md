@@ -404,12 +404,14 @@ Thread Editor v<version>。
 
 - Runner：`ubuntu-latest`
 - JDK：Temurin 21（`actions/setup-java@v4`）
-- Android SDK：`android-actions/setup-android@v3`
-- 额外安装：
+- Android SDK：使用 runner 预装的 SDK（`$ANDROID_HOME`，缺省 `/usr/local/lib/android/sdk`），
+  从其 `cmdline-tools` 中定位 `sdkmanager`，接受许可后安装所需包：
   ```bash
-  sdkmanager --install "platforms;android-37.0" "build-tools;37.0.0"
+  "$SDKMANAGER" --install "platforms;android-37.0" "build-tools;37.0.0"
   ```
   注意包 ID 是 **`platforms;android-37.0`**，不是 `platforms;android-37`；后者在 SDK 仓库中不存在。
+  不要改用 `android-actions/setup-android@v3`：它在 runner 的新版 cmdline-tools 上会尝试安装已不存在的
+  `tools` 包并直接失败（2026-10-19 首次运行的实际失败原因）。
 - Gradle：`gradle/actions/setup-gradle@v4`
 - 构建：`./gradlew :androidApp:assembleDebug`
 - 上传：`androidApp/build/outputs/apk/debug/androidApp-debug.apk`，artifact 名为 `ThreadEditor-debug`
